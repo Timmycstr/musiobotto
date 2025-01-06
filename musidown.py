@@ -1,59 +1,75 @@
-from aiogram import Bot, Dispatcher, Router
-from aiogram.types import Message, FSInputFile
-from pytube import YouTube
-import asyncio
+import telebot
+import yt_dlp
 import os
-import logging
+import re
 
-logging.basicConfig(filename='bot.log', level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Замените на ваш токен от BotFather
+BOT_TOKEN = '-----------'
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# Замените 'YOUR_BOT_TOKEN' на токен вашего бота
-BOT_TOKEN = '7817558551:AAGe1UthE8wwIBhOFC41SekSHutW4Cg1Zf8'
+YOUTUBE_URL_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+"
 
-# Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
-router = Router()
-dp = Dispatcher()
-dp.include_router(router)
-
-# Папка для сохранения загруженных аудио
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-
-@router.message(commands=['start', 'help'])
-async def send_welcome(message: Message):
-    await message.answer("Привет! Отправь мне ссылку на видео с YouTube, и я извлеку для тебя аудио.")
-
-@router.message()
-async def download_audio(message: Message):
-    url = message.text
-    if not url.startswith("http"):
-        await message.answer("Пожалуйста, отправь корректную ссылку на видео с YouTube.")
-        return
+def download_audio(url):
+    ydl_opts = {
+        'format': 'bestaudio[ext=mp3]/bestaudio',
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'postprocessors': []
+    }
 
     try:
-        await message.answer("Загружаю аудио, подожди немного...")
-        yt = YouTube(url)
-        audio_stream = yt.streams.filter(only_audio=True).first()
-        file_path = audio_stream.download(output_path=DOWNLOAD_FOLDER)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            audio_file = ydl.prepare_filename(info)
 
-        # Отправляем файл пользователю
-        audio_file = FSInputFile(file_path)
-        await message.answer_audio(audio_file, caption=f"Вот твое аудио: {yt.title}")
+            # Проверяем, если файл не имеет расширение mp3, переименовываем
+            if not audio_file.endswith('.mp3'):
+                base, ext = os.path.splitext(audio_file)
+                new_file = base + '.mp3'
+                os.rename(audio_file, new_file)
+                return new_file
 
-        # Удаляем файл после отправки
-        os.remove(file_path)
+            return audio_file
     except Exception as e:
-        await message.answer(f"Произошла ошибка: {e}")
+        raise RuntimeError(f"Ошибка загрузки аудио: {e}")
 
-async def main():
-    dp.startup.register(on_startup)
-    await dp.start_polling(bot)
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.reply_to(message, "Привет! Отправь мне ссылку на видео с YouTube, и я скачаю аудио дорожку!")
 
-async def on_startup():
-    print("Бот запущен")
+@bot.message_handler(commands=['d'])
+def activate_group_mode(message):
+    bot.reply_to(message, "Групповой режим активирован! Отправьте ссылку на YouTube для скачивания аудио.")
+
+@bot.message_handler(func=lambda message: re.match(YOUTUBE_URL_REGEX, message.text))
+def handle_message(message):
+    url = message.text
+    bot.reply_to(message, "Скачиваю аудио, подождите...")
+    try:
+        audio_file = download_audio(url)
+
+        # Проверяем размер файла
+        if os.path.getsize(audio_file) > 50 * 1024 * 1024:  # Ограничение Telegram
+            bot.reply_to(message, "Файл слишком большой для отправки через Telegram.")
+            os.remove(audio_file)
+            return
+
+        with open(audio_file, 'rb') as audio:
+            bot.send_audio(
+                message.chat.id,
+                audio,
+                caption="Ваше аудио готово!"
+            )
+
+        # Удаляем временный файл
+        os.remove(audio_file)
+    except Exception as e:
+        bot.reply_to(message, f"Произошла ошибка: {e}")
+
+@bot.message_handler(func=lambda message: True)
+def handle_invalid_message(message):
+    bot.reply_to(message, "Пожалуйста, отправьте действительную ссылку на видео YouTube.")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    os.makedirs('downloads', exist_ok=True)
+    print("Бот запущен и готов к работе.")
+    bot.infinity_polling()
