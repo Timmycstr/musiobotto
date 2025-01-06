@@ -1,5 +1,4 @@
-aiogram
-pytube
-logging
+telebot
+yt_dlp
 os
-asyncio
+re
