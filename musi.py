@@ -5,7 +5,7 @@ import re
 import sys
 
 # Замените на ваш токен от BotFather
-BOT_TOKEN = '7817558551:AAHMYy7bKR2SAItVzufV6D47KdPOuCPYy-A'
+BOT_TOKEN = '--------------------------'
 bot = telebot.TeleBot(BOT_TOKEN)
 
 YOUTUBE_URL_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+"
@@ -24,10 +24,14 @@ def download_audio(url, message):
             info = ydl.extract_info(url, download=True)
             audio_file = ydl.prepare_filename(info)
             
+            # Проверяем, если файл не имеет расширение .mp3, переименовываем
             if not audio_file.endswith('.mp3'):
                 base, ext = os.path.splitext(audio_file)
                 new_file = base + '.mp3'
-                os.rename(audio_file, new_file)
+                
+                # Проверяем, существует ли уже файл с таким именем
+                if not os.path.exists(new_file):
+                    os.rename(audio_file, new_file)
                 audio_file = new_file
             
             return audio_file, status_msg
@@ -75,3 +79,4 @@ if __name__ == '__main__':
     os.makedirs('downloads', exist_ok=True)
     print("Бот запущен и готов к работе.")
     bot.infinity_polling()
+
